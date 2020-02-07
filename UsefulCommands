@@ -1,0 +1,246 @@
+
+#Search in Mulesoft logs by a range time an save in a a.txt file the result
+sed -n '/\[09-10 10:30:/,/\[09-10 10:35:/p' logsMulesoft/mule-qtc.log > a.txt 
+
+#**************************************************************************************
+
+#Get the top 20 of more frequently errors codes returned to QTC platform 
+cat logsMulesoft/qtc.log | grep FINAL | cut -d "\"" -f 8 | sort | uniq -c | sort -nr | head –20 
+
+#**************************************************************************************
+
+#Show The final responses from failed migrations.
+./cTail.sh -1000000 | grep "FINAL RESPONSE" | grep "migration" | grep "dynamicData" | grep "null" 
+
+#**************************************************************************************
+
+#Show colorized tail of migrations 
+#cTailMigrations.sh 
+tail $1 logsMulesoft/migrations.log | awk '{split($0,a,"|"); print a[1]"|"a[2]"|"a[3]"|"a[4]"|"a[5]"|"a[6]"|"a[7]"|"a[8]"|"a[9]"|\033[0;44m"a[10]"\033[0m|\033[0;32m"a[11]"\033[0m|\033[0;33m"a[12]"\033[0m|\033[0;94m"a[13]"\033[0m|\033[0;35m"a[14]"\033[0m|\033[0;36m"a[15]"\033[0m"}' 
+
+#**************************************************************************************
+
+#Get all transaction from a specified (as parameter) devicedId 
+#cGetDeviceIdTransactions.sh 
+# USE: 
+# 
+#       cGetDeviceIdTransactions.sh <deviceId> [.1|.2|.3...] 
+#Excecute as: 
+#./cGetDeviceTransactionIdTransactions.sh 100180 .1    -> To search into yesterday log file 
+#./cGetDeviceTransactionIdTransactions.sh 100180         -> To search into current log file 
+#./cGetDeviceTransactionIdTransactions.sh 100180 .2     -> To search into previous yesterday log file 
+
+for i in `cat logsMulesoft/qtc.log$2 | grep "START FLOW" | grep -e "\"deviceId\": \"$1\"" -e "deviceId=$1"| cut -d "|" -f 7` 
+do 
+        cat logsMulesoft/qtc.log$2 | grep $i | grep "$2" 
+done 
+
+
+#**************************************************************************************
+
+#Tail version to colorize the messages (request response) QTC-Mulesoft-Aeon 
+#cTail.sh 
+tail $1 logsMulesoft/qtc.log | awk '{split($0,a,"|"); print a[1]"|"a[2]"|"a[3]"|"a[4]"|"a[5]"|"a[6]"|"a[7]"|"a[8]"|"a[9]"|\033[0;44m"a[10]"\033[0m|\033[0;32m"a[11]"\033[0m|\033[0;33m"a[12]"\033[0m|\033[0;94m"a[13]"\033[0m|\033[0;35m"a[14]"\033[0m|\033[0;36m"a[15]"\033[0m"}' 
+
+
+#**************************************************************************************
+
+#Tail version to colorize the messages (request response) QTC-Mulesoft-Aeon 
+#NOTE: The script isn’t optimized, so, any high volme of transactions can request a high volume in resources (CPU).
+#This script must be optimized
+# Execute as: 
+# 
+#       ./cGetVelocityCheck.sh <file with QTC transactions> 
+# 
+
+# Sure a clean environment 
+rm -f bb.txt cc.txt 
+
+# Get the error records and save in temporaly file bb.txt the mobileNumber & amount combination 
+for i in `grep "espera 10 minutos" $1 | grep FINAL | grep tae | cut -d '|' -f 7` 
+do 
+        #echo `cat $1 | grep START | grep $i | cut -d "\"" -f  4-8` 
+        cat $1 | grep START | grep $i | cut -d "\"" -f  4-8 >> bb.txt 
+done 
+
+# Read the mobileNUmber combination to get the MuleId and save it in temporary file cc.txt 
+while read -r j 
+do 
+        #echo $j 
+        cat $1 | grep "$j" | cut -d '|' -f 7 | sort | uniq >> cc.txt 
+done < bb.txt 
+
+# Read the MuleId from cc.txt and get each log trace 
+while read -r k 
+do 
+        #echo $k 
+        cat $1 | grep $k 
+done < cc.txt 
+
+rm -f bb.txt cc.txt 
+
+
+#**************************************************************************************
+
+#Script to restart ESB mulesoft when the CPU average is upper 70% in the last 60 sec
+#NOTE: be care in the frequency to launch the script before any high CPU consumption event,
+#restarts can happen if the average of the last 60 sec maintain a high CPU  
+#!/bin/bash 
+
+CPU_LOAD_LASTMINUTE=$(uptime | cut -d"," -f4 | cut -d":" -f2 | cut -d" " -f2 | sed -e "s/\.//g") 
+CORES=`cat /proc/cpuinfo | awk '/^processor/{print $3}' | wc -l` 
+CPU_THRESHOLD=80 
+
+if [ $CPU_LOAD_LASTMINUTE -gt $(( CPU_THRESHOLD*CORES )) ] ; then 
+   echo `date`: LOAD CPU: $(( $CPU_LOAD_LASTMINUTE/CORES ))%, THRESHOLD: $(( CPU_THRESHOLD ))% 
+   echo `date`: High CPU use at the last minute!!, the Mule ESB will be restarted... 
+   echo `date`: Statistics: uptime 
+   echo `date`: Creating Dumps... 
+   for i in `sudo jps | grep Mule | cut -d ' ' -f 1`; do sudo jstack -l $i > Mule_$(i)_$(date +%Y%m%d_%H%M%S).tdump; done 
+   echo `date`: Dumps createds ok 
+   echo `date`: Restarting mule-enterprise-standalone-4.2.1-hf1 ESB 
+   sudo /home/ubuntu/mule-enterprise-standalone-4.2.1-hf1/bin/mule restart 
+   echo `date`: Restart completed 
+#else 
+         #echo `date`: The last minute is not with high CPU consumption: $(( CPU_LOAD_LASTMINUTE/CORES ))% vs THRESHOLD $(( CPU_THRESHOLD ))%. 
+fi 
+exit 0 
+
+
+#**************************************************************************************
+
+
+#Script to get a map with errors vs concodes from PAGACA/CONCENTRA logs 
+
+CountErrorsFile=concentraCountErrors.txt 
+Report=concentraErrorsReport.txt 
+LogPath=/var/log/mulesoft/concentra 
+ReqIdsFile=reqIdsFile.txt 
+
+true > $CountErrorsFile 
+true > $Report 
+true > $ReqIdsFile 
+cat /var/log/mulesoft/concentra/concentra.log | grep "\"responseCode\": \"" | grep -v "\"responseCode\": \"000\"" | grep responseCode | grep "responseCode" | cut -d "\""  -f 10 | sort | uniq > $CountErrorsFile 
+cat $CountErrorsFile |  while read i 
+do 
+        echo $i 
+        cat /var/log/mulesoft/concentra/concentra.log | grep "\"responseCode\": \"" | grep -v "\"responseCode\": \"000\"" | grep responseCode | grep "responseCode" | grep "$i" | cut -d "|" -f 9  > $ReqIdsFile 
+        for j in `cat $ReqIdsFile` 
+        do 
+                echo $j 
+                concode=`cat /var/log/mulesoft/concentra/concentra.log | grep $j | grep "concode=" | cut -d "&" -f 2 | cut -d "=" -f 2 | cut -d " " -f 1` 
+                echo $concode\|$j\|$i >> $Report 
+        done 
+done 
+
+rm -f $CountErrorsFile 
+rm -f $ReqIdsFile 
+
+ 
+#**************************************************************************************
+
+#Get the count of reported errors. 
+cat /var/log/mulesoft/concentra/concentra.log | grep "\"responseCode\": \"" | grep -v "\"responseCode\": \"000\"" | grep responseCode | grep -v "\"data-value\": \"_\"" | grep "responseCode" | cut -d "\""  -f 46 | sort | uniq -c | sort -rn 
+
+
+#**************************************************************************************
+
+#Get the REQ<requestId> of trasnactions with error. 
+cat /var/log/mulesoft/concentra/concentra.log | grep "\"responseCode\": \"" | grep -v "\"responseCode\": \"000\"" | grep responseCode | grep -v "\"data-value\": \"_\"" | grep "responseCode" | cut -d "|"  -f 9 
+
+
+#**************************************************************************************
+
+
+#Get the all logs from sessions responded with error 
+for i in `cat /var/log/mulesoft/concentra/concentra.log | grep "\"responseCode\": \"" | grep -v "\"responseCode\": \"000\"" | grep responseCode | grep -v "\"data-value\": \"_\"" | grep "responseCode" | cut -d "|"  -f 9`; do cat /var/log/mulesoft/concentra/concentra.log | grep $i; done 
+
+
+#**************************************************************************************
+
+
+#Get the logs with http send error and the two previous lines 
+#!/bin/sh 
+
+export SSHPASS=Z8yV5WvNwWLOqLhzmtAP2a3XTnWFnztf 
+blmFTPUser=kineto_santander 
+santanderFTPUser=e2660569 
+workPath=/home/ubuntu/santander/scripts 
+
+cd $workPath 
+currentDate=`date '+%Y%m%d'` 
+ftpLocal=ftpSantander 
+echo `date` "***** START DOWNLOAD *****" 
+
+# Get the last file uploades 
+lastUploaded=`cat last.txt | cut -d '.' -f 1 | cut -c12-23` 
+if [ -z "$lastUploaded"  ] 
+then 
+        lastUploaded=currentDate 
+fi 
+
+#If download from yesterday (NOT today) 
+if test "$1" = "yesterday" 
+then 
+        currentDate=$(($currentDate - 1)) 
+fi 
+
+# Download from Santander SFTP 
+##sshpass -e sudo sftp $santanderFTPUser@buzon.santander.com.mx -vv << EOF 
+##      binary 
+##      lcd $ftpLocal 
+##      passive 
+##      mget *$currentDate*.zip 
+##      quit 
+##EOF 
+
+# requiere entrar al directorio cd reslpaldo de kineto para tomar los procesados 
+echo `date` "Current date to download" $currentDate 
+sudo sftp -i e2660569.key e2660569@170.169.130.85 << EOF 
+binary 
+lcd $ftpLocal 
+passive 
+cd respaldo 
+mget *$currentDate*.zip 
+quit 
+EOF 
+
+echo `date` "***** END DOWNLOAD *****" 
+echo `date` "***** START UPLOAD *****" 
+## Upload file only if by name is more recent than lastUploaded 
+#echo `ls -1 $ftpLocal/*.zip | cut -d '/' -f 2 | cut -d '.' -f 1` 
+echo `date` "Last uploaded" $lastUploaded 
+cd $ftpLocal 
+for file in `ls -1 *.zip | cut -d '.' -f 1 | cut -c12-23` 
+do 
+        #echo $(($file > $lastUploaded)) $file $lastUploaded 
+        if  [ $(($file > $lastUploaded)) -eq 1 ] 
+        then 
+                echo `date` "Uploading..." $file 
+#sshpass -e sudo sftp $blmFTPUser@18.208.66.109 << EOF 
+#aqui vienen los datos de AEON para la subida de los files 
+sudo sftp -i ../e0805866.key e0805866@170.169.130.85  << EOF 
+cd respaldo 
+echo "Uploaded..." $file 
+EOF 
+fi 
+done 
+echo `date` "***** END UPLOAD *****" 
+
+echo `date` "***** The last file uploaded was:" `ls -1 -t *.zip | head -1` "*****" 
+#Save the last by name file downloaded 
+sudo ls -1 -t *.zip | sudo head -1  > $workPath/last.txt 
+cd .. 
+
+#################### MAINTAIN ######################## 
+daysHistory=2 
+dateToDelete=`echo *$(($currentDate - $daysHistory))*.zip*` 
+echo `date` "***** MANTAIN ***** DATE TO DELETE: " $dateToDelete 
+rm -fv $ftpLocal/*$dateToDelete*.zip 
+find ./$ftpLocal/*.zip -mtime +$(($daysHistory-1)) -type f -delete 
+echo `date` "***** END *****" 
+
+ 
+
+
+
